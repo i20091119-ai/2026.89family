@@ -143,6 +143,12 @@
   .urlbox button{border:none;border-left:2px solid var(--scan);background:var(--scan);color:var(--ink);font-weight:800;padding:0 14px;cursor:pointer;font-family:inherit;font-size:13px}
   #qr{background:#fff;padding:12px;width:max-content;margin:14px auto 4px;border:2px solid var(--scan)}
   .qrcap{text-align:center;font-size:11px;color:#c9ccd6}
+  .nfcmeter{margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+  .nfcmeter .cap{color:#c9ccd6;font-weight:600}
+  .nfcmeter b{color:#fff;font-size:14px}
+  .nfcmeter .fit{padding:2px 9px;border:1.5px solid;font-size:11px;font-weight:800}
+  .nfcmeter .fit.ok{color:#08240f;background:var(--ok);border-color:var(--ok)}
+  .nfcmeter .fit.no{color:#fff;background:var(--accent);border-color:var(--accent)}
   .guide{margin-top:14px;font-size:11.5px;color:#c9ccd6;border-top:1px solid #333;padding-top:10px}
   .guide b{color:var(--scan)}
   .guide ol{margin:6px 0 0 18px}
@@ -276,6 +282,7 @@
         <input type="text" id="urlOut" readonly>
         <button id="copyBtn">복사</button>
       </div>
+      <div class="nfcmeter" id="nfcMeter"></div>
       <div id="qr"></div>
       <div class="qrcap">QR로도 열 수 있어요 — 폰 카메라로 찍어 미리 보기</div>
       <div class="guide">
@@ -321,6 +328,8 @@ COLORS.forEach((c,i)=>{
 const LIKE_PALETTE = [
   "운동","게임","책","그림","음악","요리","과학","동물","여행","춤","수학","영화","코딩","노래","식물"
 ];
+// URL 압축용 고정 인덱스 목록(기본 칩 15개). LIKE_PALETTE는 직접 추가로 늘어나므로 원본을 따로 보존.
+const PRESET15 = LIKE_PALETTE.slice();
 const LIKE_COLORS = ["#e5482c","#1b6cff","#1f9d5a","#f5c518","#8b3fd1","#f08a24","#39b8e8","#e85d9b","#2b3a8f","#1a9d8f","#c0392b","#6d4caf","#d68910","#16a085","#a93226"];
 let picked = []; // {k, v}
 const chipPick = document.getElementById('chipPick');
@@ -496,6 +505,7 @@ function render(d){
   // url + qr
   const url = buildUrl(d);
   document.getElementById('urlOut').value = url;
+  updateNfcMeter(url);
   const qr=document.getElementById('qr');qr.innerHTML='';
   try{
     if(typeof QRCode!=='undefined'){
@@ -506,25 +516,61 @@ function render(d){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
-// ---- url encode/decode ----
+// ---- url encode/decode (NFC 태그 용량을 위해 압축) ----
+// 압축 규칙: 생일은 YYYYMMDD(대시 제거), 기본 칩은 한글 대신 "인덱스+값" 2글자로(운동:8 → "08"),
+//           직접 추가한 항목만 한글 이름을 m 파라미터에 유지. 데이터는 여전히 전부 URL에.
 function buildUrl(d){
   const p=new URLSearchParams();
-  if(d.n)p.set('n',d.n); if(d.b)p.set('b',d.b); if(d.h)p.set('h',d.h);
+  if(d.n)p.set('n',d.n);
+  if(d.b)p.set('b',d.b.replace(/-/g,''));           // 2015-03-14 → 20150314
+  if(d.h)p.set('h',d.h);
   if(d.f)p.set('f',d.f); if(d.d)p.set('d',d.d); p.set('c',d.c);
-  // 비율: 이름:값~이름:값
-  const lstr=(d.l||[]).map(it=>it.k+':'+it.v).join('~');
-  if(lstr)p.set('l',lstr);
+  const preset=[], custom=[];
+  (d.l||[]).forEach(it=>{
+    const i=PRESET15.indexOf(it.k);
+    const v=Math.max(1,Math.min(10,parseInt(it.v,10)||1));
+    if(i>=0) preset.push(i.toString(16)+v.toString(36)); // 인덱스(0~e) + 값(1~a)
+    else custom.push(it.k+':'+it.v);                      // 직접 추가 항목은 이름 유지
+  });
+  if(preset.length)p.set('l',preset.join(''));
+  if(custom.length)p.set('m',custom.join('~'));
   return location.origin+location.pathname+'?'+p.toString();
 }
 function readUrl(){
   const p=new URLSearchParams(location.search);
   if(![...p.keys()].length) return null;
+  let b=p.get('b')||'';
+  if(/^\d{8}$/.test(b)) b=b.slice(0,4)+'-'+b.slice(4,6)+'-'+b.slice(6,8); // 20150314 → 2015-03-14
+  const l=[];
   const lraw=p.get('l')||'';
-  const l = lraw? lraw.split('~').map(s=>{const [k,v]=s.split(':');return {k, v:+v||1};}) : [];
+  if(lraw.includes(':')||lraw.includes('~')){
+    // 구버전 호환: l=운동:8~게임:3
+    lraw.split('~').forEach(s=>{const [k,v]=s.split(':'); if(k) l.push({k, v:+v||1});});
+  } else {
+    // 신버전: 2글자씩(인덱스+값)
+    for(let i=0;i<lraw.length;i+=2){
+      const idx=parseInt(lraw[i],16);
+      const v=parseInt(lraw[i+1]||'5',36)||1;
+      if(!isNaN(idx) && PRESET15[idx]) l.push({k:PRESET15[idx], v});
+    }
+  }
+  const mraw=p.get('m')||'';
+  if(mraw) mraw.split('~').forEach(s=>{const [k,v]=s.split(':'); if(k) l.push({k, v:+v||1});});
   return {
-    n:p.get('n')||'', b:p.get('b')||'', h:p.get('h')||'',
+    n:p.get('n')||'', b, h:p.get('h')||'',
     f:p.get('f')||'', d:p.get('d')||'', c:+(p.get('c')||0), l
   };
+}
+// NFC URI 레코드 저장 바이트: "https://"는 1바이트 접두어로 축약, 나머지는 저장되는 그대로
+function nfcBytes(url){
+  const rest=url.replace(/^https?:\/\//i,'');
+  return 1 + new TextEncoder().encode(rest).length;
+}
+function updateNfcMeter(url){
+  const el=document.getElementById('nfcMeter'); if(!el) return;
+  const b=nfcBytes(url), LIM=132; const ok=b<=LIM;   // NTAG213(가장 작은 태그) 실사용 한도 ≈ 132B
+  el.innerHTML = `<span class="cap">NFC 저장 크기</span><b>${b}바이트</b>`
+    + `<span class="fit ${ok?'ok':'no'}">${ok?'작은 태그(NTAG213)도 OK ✓':'NTAG213 초과 — 장래희망·비율 항목을 줄여보세요'}</span>`;
 }
 
 // ---- events ----
