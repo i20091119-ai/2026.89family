@@ -15,7 +15,8 @@
 이름의 수(한글 자모 순번 합, 분해 과정 표시) · 태어나서 살아온 날 · 키 · 좋아하는 수(성질 태그) · 나를 이루는 비율(누적 막대그래프) · 나의 색(라벨 강조색).
 
 ## 배포
-`.github/workflows/pages.yml`이 배포 브랜치 푸시 시 GitHub Pages를 자동으로 켜고 배포합니다.
+GitHub Pages를 **Deploy from a branch** (배포 브랜치 `claude/deployment-task-jtxl2u`, 루트 `/`)로 서빙합니다.
+브랜치에 푸시하면 GitHub 내장 빌드가 자동으로 재배포합니다. `.nojekyll`로 Jekyll 처리 없이 정적 파일을 그대로 서빙합니다.
 공개 URL: `https://i20091119-ai.github.io/2026.89family/`
 
 ## 크레딧
